@@ -1,0 +1,181 @@
+---
+title: Practical Machine Learning Project  
+author: "Mohammad Masjkur"
+output: 
+  html_document:
+    keep_md: yes
+    md_document:
+    variant: markdown_github
+---
+
+## Background  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Given data from accelerometers, the goal is to predict the class of action which is one of the following:
+
+* exactly according to the specification (A)
+* throwing elbows to the front (B)
+* lifting the dumbbell only halfway (C)
+* lowering the dumbbell only halfway (D)
+* throwing the hips to the front (E).
+
+More information is available from the website here: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).   
+
+## Data Sources  
+The training data for this project is available here:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)  
+The test data is available here:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)  
+
+## Loading R libraries and Data
+We first load the R libraries that are necessary for the complete analysis.  
+```{r setup, include=FALSE}
+library(ggplot2)
+library(lattice)
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+```  
+
+## Reading Data
+
+```{r}
+
+UrlTrain <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+UrlTest  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv("pml-training.csv")
+testing  <- read.csv("pml-testing.csv")
+dim(training)
+```  
+
+```{r}
+dim(testing)
+```
+
+The training data set contains `r dim(training)[1]` observations and `r dim(training)[2]` variables, while the testing data set contains `r dim(testing)[1]` observations and `r dim(testing)[2]` variables. The `classe` variable in the training set is the outcome to predict. 
+
+## Cleaning Data 
+Those variables have plenty of NA, that can be removed with the cleaning procedures as follows. The Near Zero variance (NZV) variables are also removed and the ID variables as well.
+  
+```{r}
+NZV <- nearZeroVar(training)
+training <- training[, -NZV]
+testing  <- testing[, -NZV]
+dim(training)
+```  
+
+```{r}
+dim(testing)
+```
+
+```{r}
+# remove variables that are mostly NA
+AllNA    <- sapply(training, function(x) mean(is.na(x))) > 0.95
+AllNA    <- sapply(testing, function(x) mean(is.na(x))) > 0.95
+training <- training[, AllNA==FALSE]
+testing  <- testing[, AllNA==FALSE]
+dim(training)
+```  
+
+```{r}
+dim(testing)
+```
+
+```{r}
+# remove identification only variables (columns 1 to 5)
+training <- training[, -(1:5)]
+testing  <- testing[, -(1:5)]
+dim(training)
+```  
+
+```{r}
+dim(testing)
+```
+
+The cleaned training data set contains `r dim(training)[1]` observations and `r dim(training)[2]` variables, while the testing data set contains `r dim(testing)[1]` observations and `r dim(testing)[2]` variables.  
+
+## Correlation Analysis  
+```{r}
+corMatrix <- cor(training[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.6, tl.col = 'black')
+```  
+Positive correlations are displayed in blue and negative correlations in red color. There is also insignificant correlation (less large intensity color blocks) among the variables. 
+
+## Partitioning Training Set  
+we split the cleaned training set into a pure training data set (70%) and a validation data set (30%). We will use the validation data set to conduct a cross validation.  
+```{r}
+inTrain  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+Trainset <- training[inTrain, ]
+ValidTest  <- training[-inTrain, ]
+dim(Trainset)
+```  
+
+```{r}
+dim(ValidTest)
+``` 
+
+The Dataset consists of the observations as follows:  
+1. Training Data: `r dim(Trainset)[1]` observations.  
+2. Testing Data: `r dim(ValidTest)[1]` observations.  
+
+## Prediction Modeling 
+
+### Decision Tree  
+We build a predictive model for activity recognition using <b>Decision Tree</b> algorithm.  
+```{r warning=FALSE, error=FALSE}
+modFitDecTree <- rpart(factor(classe) ~ ., data=Trainset, method="class")
+fancyRpartPlot(modFitDecTree)
+```  
+
+We estimate the performance of the model on the <b>validation</b> data set.  
+```{r}
+predictDecTree <- predict(modFitDecTree, ValidTest, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, factor(ValidTest$classe))
+confMatDecTree
+```  
+
+```{r}
+accuracy <- postResample(predictDecTree, factor(ValidTest$classe))
+ose <- 1 - as.numeric(confusionMatrix(factor(ValidTest$classe), predictDecTree)$overall[1])
+```
+
+The Estimated Accuracy of Decision Tree is `r accuracy[1]*100`% and the Estimated Out-of-Sample Error is `r ose*100`%.  
+
+### Random Forest
+Random forests or random decision forests are an ensemble learning method for classification, regression and other tasks, that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees. Random decision forests correct for decision trees' habit of overfitting to their training set. Source: *Wikipedia* 
+  
+```{r}
+modelRF <- train(factor(classe) ~ ., data = Trainset, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+modelRF
+```  
+
+We estimate the performance of the model on the <b>validation</b> data set.  
+```{r}
+# prediction on Test dataset
+predictRandForest <- predict(modelRF, ValidTest)
+confMatRandForest <- confusionMatrix(predictRandForest, factor(ValidTest$classe))
+confMatRandForest
+```  
+
+```{r}
+accuracy <- postResample(predictRandForest, factor(ValidTest$classe))
+ose <- 1 - as.numeric(confusionMatrix(factor(ValidTest$classe), predictRandForest)$overall[1])
+```
+
+The Estimated Accuracy of the Random Forest Model is `r accuracy[1]*100`% and the Estimated Out-of-Sample Error is `r ose*100`%. 
+
+## Conclusion
+The confusion matrices show, that the Random Forest algorithm performs better than decision trees. The accuracy for the Random Forest model was 0.998 (95% CI:(0.996, 0.999)) compared to 0.747 (95% CI : (0.736, 0.758)) for Decision Tree model. The random Forest model is choosen.  
+
+## Applying the Selected Model for Testing Data Set  
+
+We apply the <b>Random Forest</b> model to the original testing data set   
+```{r}
+predictTEST <- predict(modelRF, newdata=testing)
+predictTEST
+```  
+
